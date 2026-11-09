@@ -4,6 +4,13 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
+// Baileys 6.7 uses the Web Crypto global. nodejs-mobile on Node 18 may not
+// expose globalThis.crypto by default, so provide Node's built-in Web Crypto
+// implementation before importing Baileys.
+if (!globalThis.crypto && crypto.webcrypto) {
+  globalThis.crypto = crypto.webcrypto;
+}
+
 const PORT = Number(process.argv[2]);
 const SECRET = String(process.argv[3] || '');
 const DATA_DIR = process.argv[4] || path.join(__dirname, 'data');
