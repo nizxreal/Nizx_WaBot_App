@@ -83,7 +83,7 @@ jobs:
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
-          ./gradlew assembleRelease --no-daemon --stacktrace
+          gradle assembleRelease --no-daemon --stacktrace
 
       - name: Buat release otomatis
         env:
