@@ -309,15 +309,4 @@ setInterval(() => {
   console.log(`[hb] up=${Math.round((Date.now() - START) / 60000)}m rss=${Math.round(m.rss / 1048576)}MB heap=${Math.round(m.heapUsed / 1048576)}MB wa=${bot.status} msgs=${bot.msgs}`);
 }, 5 * 60 * 1000);
 
-if (hasSession()) connect();e });
-});
-server.on('error', (e) => console.error('http error:', e.message));
-server.listen(PORT, '127.0.0.1', () => console.log(`[node] http 127.0.0.1:${PORT}`));
-
-console.log(`[node] ${process.version} ${process.platform}/${process.arch} baileys=${BAILEYS}`);
-console.log(`[node] data=${DATA_DIR}`);
-
-setInterval(() => {
-  const m = process.memoryUsage();
-  console.log(`[hb] up=${Math.round((Date.now() - START) / 60000)}m rss=${Math.round(m.rss / 1048576)}MB heap=${Math.round(m.heapUsed / 1048576)}MB wa=${bot.status} msgs=${bot.msgs}`);
-}, 5 * 60 * 1000);
+if (hasSession()) connect();
