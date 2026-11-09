@@ -3,12 +3,6 @@ name: Build PoC APK
 on:
   push:
     branches: [main]
-    paths:
-      - 'app/**'
-      - 'poc/**'
-      - 'build.gradle'
-      - 'settings.gradle'
-      - '.github/workflows/poc-apk.yml'
   workflow_dispatch:
     inputs:
       nodejs_mobile_tag:
@@ -25,6 +19,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+
     steps:
       - uses: actions/checkout@v4
 
@@ -41,53 +36,62 @@ jobs:
         with:
           gradle-version: '8.9'
 
+      - name: Decode keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 --decode > "$GITHUB_WORKSPACE/app/release-keystore.jks"
+          echo "KEYSTORE_PATH=$GITHUB_WORKSPACE/app/release-keystore.jks" >> "$GITHUB_ENV"
+
       - name: Unduh nodejs-mobile
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -e
-          NODE_TAG='${{ inputs.nodejs_mobile_tag }}'
-          NODE_TAG="${NODE_TAG:-v18.17.2}"
+          NODE_TAG="${{ inputs.nodejs_mobile_tag || 'v18.17.2' }}"
           mkdir -p /tmp/nm && cd /tmp/nm
           gh release download "$NODE_TAG" --repo nodejs-mobile/nodejs-mobile --pattern '*android*'
-          ls -la
           for f in *.zip; do unzip -q "$f"; done
           LIB=$(find /tmp/nm -path '*arm64-v8a*' -name libnode.so | head -n1)
-          if [ -z "$LIB" ]; then echo "libnode.so arm64-v8a tidak ditemukan"; find /tmp/nm | head -60; exit 1; fi
+          if [ -z "$LIB" ]; then
+            echo "libnode.so arm64-v8a tidak ditemukan"
+            find /tmp/nm | head -60
+            exit 1
+          fi
           mkdir -p "$GITHUB_WORKSPACE/app/libnode/bin/arm64-v8a"
           cp "$LIB" "$GITHUB_WORKSPACE/app/libnode/bin/arm64-v8a/libnode.so"
-          ls -lh "$GITHUB_WORKSPACE/app/libnode/bin/arm64-v8a/"
-          (readelf -d "$LIB" | grep -E 'NEEDED|SONAME') || true
 
       - name: Siapkan proyek Node
         run: |
           set -e
-          BAILEYS_VERSION='${{ inputs.baileys_version }}'
-          BAILEYS_VERSION="${BAILEYS_VERSION:-6.7}"
+          BAILEYS_VERSION="${{ inputs.baileys_version || '6.7' }}"
           mkdir -p "$RUNNER_TEMP/njs"
           cp poc/nodejs-project/main.js "$RUNNER_TEMP/njs/"
           cd "$RUNNER_TEMP/njs"
           npm init -y > /dev/null
           npm install --omit=dev --no-audit --no-fund "@whiskeysockets/baileys@$BAILEYS_VERSION"
-          npm ls @whiskeysockets/baileys --depth=0
-          du -sh node_modules
           mkdir -p "$GITHUB_WORKSPACE/app/src/main/assets"
           zip -qr "$GITHUB_WORKSPACE/app/src/main/assets/nodejs-project.zip" .
-          ls -lh "$GITHUB_WORKSPACE/app/src/main/assets/nodejs-project.zip"
 
       - name: Versi NDK
         run: echo "NDK_VERSION=$(basename "$ANDROID_NDK_LATEST_HOME")" >> "$GITHUB_ENV"
 
-      - name: Build APK
-        run: gradle assembleDebug --no-daemon --stacktrace
+      - name: Build Release APK
+        env:
+          KEYSTORE_PATH: ${{ env.KEYSTORE_PATH }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          ./gradlew assembleRelease --no-daemon --stacktrace
 
-      - name: Rilis
+      - name: Buat release otomatis
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          cp app/build/outputs/apk/debug/app-debug.apk nizx-poc.apk
+          cp app/build/outputs/apk/release/app-release.apk nizx-poc.apk
           ls -lh nizx-poc.apk
           TAG="poc-${{ github.run_number }}"
           gh release create "$TAG" nizx-poc.apk --prerelease \
             --title "PoC #${{ github.run_number }}" \
-            --notes "Node: ${NODE_TAG:-v18.17.2} | Baileys: ${BAILEYS_VERSION:-6.7}"
+            --notes "Node: ${{ inputs.nodejs_mobile_tag || 'v18.17.2' }} | Baileys: ${{ inputs.baileys_version || '6.7' }}"
