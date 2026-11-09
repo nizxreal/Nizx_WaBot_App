@@ -79,6 +79,29 @@ function scheduleReconnect() {
   bot.timer = setTimeout(connect, Math.min(30000, 2000 * bot.attempts));
 }
 
+function requestPairingCode(gen) {
+  const pending = bot.pending;
+  const sock = bot.sock;
+  if (!pending || pending.requesting || !sock || gen !== bot.gen) return;
+
+  pending.requesting = true;
+  Promise.resolve()
+    .then(() => sock.requestPairingCode(pending.number))
+    .then((code) => {
+      if (gen !== bot.gen || bot.pending !== pending) return;
+      bot.pending = null;
+      bot.pairingCode = String(code || '');
+      bot.status = 'pairing';
+      console.log('[wa] kode pairing dibuat');
+      pending.resolve(bot.pairingCode);
+    })
+    .catch((e) => {
+      if (gen !== bot.gen || bot.pending !== pending) return;
+      pending.requesting = false;
+      console.error('[wa] gagal meminta kode pairing:', (e && e.stack) || e);
+    });
+}
+
 async function connect() {
   if (bot.stopped) return;
   clearTimeout(bot.timer);
@@ -98,7 +121,7 @@ async function connect() {
     if (gen !== bot.gen) return;
     const sock = b.make(cfg);
     bot.sock = sock;
-    bot.status = 'connecting';
+    bot.status = bot.pending ? 'pairing' : 'connecting';
     sock.ev.on('creds.update', () => { if (gen === bot.gen) saveCreds(); });
     sock.ev.on('connection.update', (u) => onConn(gen, b, u));
     sock.ev.on('messages.upsert', (ev) => onMsg(gen, ev));
@@ -113,13 +136,8 @@ function onConn(gen, b, u) {
   if (gen !== bot.gen) return;
   const { connection, lastDisconnect, qr } = u;
 
-  if (qr && bot.pending) {
-    const p = bot.pending;
-    bot.pending = null;
-    bot.sock.requestPairingCode(p.number)
-      .then((code) => { bot.pairingCode = code; bot.status = 'pairing'; console.log('[wa] kode pairing dibuat'); p.resolve(code); })
-      .catch((e) => { bot.status = 'idle'; p.reject(e); });
-  }
+  if ((qr || connection === 'connecting') && bot.pending) requestPairingCode(gen);
+
   if (connection === 'open') {
     bot.attempts = 0;
     bot.pairingCode = '';
@@ -128,19 +146,30 @@ function onConn(gen, b, u) {
     console.log('[wa] terhubung sebagai', bot.number);
   }
   if (connection === 'close') {
-    const code = lastDisconnect && lastDisconnect.error && lastDisconnect.error.output
-      ? lastDisconnect.error.output.statusCode : undefined;
-    console.warn('[wa] koneksi tutup, kode', code);
-    bot.pairingCode = '';
+    const disconnectError = lastDisconnect && lastDisconnect.error;
+    const code = disconnectError && disconnectError.output
+      ? disconnectError.output.statusCode : undefined;
+    const reason = disconnectError && (disconnectError.message || String(disconnectError));
+    console.warn('[wa] koneksi tutup, kode', code, 'alasan', reason || '(tidak tersedia)');
     const linked = !!(bot.sock && bot.sock.authState && bot.sock.authState.creds && bot.sock.authState.creds.me);
-    if (code === b.DisconnectReason.loggedOut) { closeSock(); wipeAuth(); bot.number = ''; bot.status = 'idle'; return; }
+
+    if (code === b.DisconnectReason.loggedOut) {
+      closeSock(); wipeAuth(); bot.number = ''; bot.pairingCode = ''; bot.status = 'idle'; return;
+    }
     if (code === b.DisconnectReason.connectionReplaced) { closeSock(); bot.status = 'replaced'; return; }
     if (bot.stopped) return;
-    if (!linked && code !== b.DisconnectReason.restartRequired) {
-      closeSock(); wipeAuth(); bot.pending = null; bot.status = 'idle';
+
+    if (bot.pending) {
+      bot.pending.requesting = false;
+      bot.status = 'pairing';
+      scheduleReconnect();
       return;
     }
-    bot.status = 'reconnecting';
+    if (!linked && !bot.pairingCode && code !== b.DisconnectReason.restartRequired) {
+      closeSock(); wipeAuth(); bot.number = ''; bot.status = 'idle';
+      return;
+    }
+    bot.status = bot.pairingCode ? 'pairing' : 'reconnecting';
     scheduleReconnect();
   }
 }
@@ -175,12 +204,13 @@ async function pair(number) {
   closeSock();
   wipeAuth();
   return new Promise((resolve, reject) => {
-    bot.pending = { number: n, resolve, reject };
+    bot.pending = { number: n, resolve, reject, requesting: false };
     connect().catch(reject);
     setTimeout(() => {
       if (bot.pending && bot.pending.resolve === resolve) {
         bot.pending = null;
-        reject(new Error('Timeout meminta kode pairing'));
+        bot.status = 'error';
+        reject(new Error('Timeout meminta kode pairing. Periksa log koneksi dan coba lagi.'));
       }
     }, 30000);
   });
@@ -247,6 +277,7 @@ const server = http.createServer((req, res) => {
   const key = String(req.headers['x-key'] || '');
   const ok = key.length === SECRET.length && SECRET.length > 0 && crypto.timingSafeEqual(Buffer.from(key), Buffer.from(SECRET));
   if (!ok) return send(403, { ok: false });
+
   const url = new URL(req.url, 'http://127.0.0.1');
 
   if (req.method === 'GET' && url.pathname === '/status') return send(200, statusObj());
@@ -266,6 +297,19 @@ const server = http.createServer((req, res) => {
     return;
   }
   send(404, { ok: false });
+});
+server.on('error', (e) => console.error('http error:', e.message));
+server.listen(PORT, '127.0.0.1', () => console.log(`[node] http 127.0.0.1:${PORT}`));
+
+console.log(`[node] ${process.version} ${process.platform}/${process.arch} baileys=${BAILEYS}`);
+console.log(`[node] data=${DATA_DIR}`);
+
+setInterval(() => {
+  const m = process.memoryUsage();
+  console.log(`[hb] up=${Math.round((Date.now() - START) / 60000)}m rss=${Math.round(m.rss / 1048576)}MB heap=${Math.round(m.heapUsed / 1048576)}MB wa=${bot.status} msgs=${bot.msgs}`);
+}, 5 * 60 * 1000);
+
+if (hasSession()) connect();e });
 });
 server.on('error', (e) => console.error('http error:', e.message));
 server.listen(PORT, '127.0.0.1', () => console.log(`[node] http 127.0.0.1:${PORT}`));
