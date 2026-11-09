@@ -55,7 +55,6 @@ jobs:
           LIB=$(find /tmp/nm -path '*arm64-v8a*' -name libnode.so | head -n1)
           if [ -z "$LIB" ]; then
             echo "libnode.so arm64-v8a tidak ditemukan"
-            find /tmp/nm | head -60
             exit 1
           fi
           mkdir -p "$GITHUB_WORKSPACE/app/libnode/bin/arm64-v8a"
