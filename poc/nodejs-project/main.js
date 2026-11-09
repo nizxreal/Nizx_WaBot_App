@@ -321,5 +321,3 @@ setInterval(() => {
   const m = process.memoryUsage();
   console.log(`[hb] up=${Math.round((Date.now() - START) / 60000)}m rss=${Math.round(m.rss / 1048576)}MB heap=${Math.round(m.heapUsed / 1048576)}MB wa=${bot.status} msgs=${bot.msgs}`);
 }, 5 * 60 * 1000);
-
-if (hasSession()) connect();
