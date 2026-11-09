@@ -1,6 +1,14 @@
 name: Build PoC APK
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'poc/nodejs-project/**'
+      - 'app/**'
+      - 'build.gradle'
+      - 'settings.gradle'
+      - '.github/workflows/poc-apk.yml'
   workflow_dispatch:
     inputs:
       nodejs_mobile_tag:
@@ -38,8 +46,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -e
+          NODE_TAG='${{ inputs.nodejs_mobile_tag }}'
+          NODE_TAG="${NODE_TAG:-v18.17.2}"
           mkdir -p /tmp/nm && cd /tmp/nm
-          gh release download "${{ inputs.nodejs_mobile_tag }}" --repo nodejs-mobile/nodejs-mobile --pattern '*android*'
+          gh release download "$NODE_TAG" --repo nodejs-mobile/nodejs-mobile --pattern '*android*'
           ls -la
           for f in *.zip; do unzip -q "$f"; done
           LIB=$(find /tmp/nm -path '*arm64-v8a*' -name libnode.so | head -n1)
@@ -52,11 +62,13 @@ jobs:
       - name: Siapkan proyek Node
         run: |
           set -e
+          BAILEYS_VERSION='${{ inputs.baileys_version }}'
+          BAILEYS_VERSION="${BAILEYS_VERSION:-6.7}"
           mkdir -p "$RUNNER_TEMP/njs"
           cp poc/nodejs-project/main.js "$RUNNER_TEMP/njs/"
           cd "$RUNNER_TEMP/njs"
           npm init -y > /dev/null
-          npm install --omit=dev --no-audit --no-fund "@whiskeysockets/baileys@${{ inputs.baileys_version }}"
+          npm install --omit=dev --no-audit --no-fund "@whiskeysockets/baileys@$BAILEYS_VERSION"
           npm ls @whiskeysockets/baileys --depth=0
           du -sh node_modules
           mkdir -p "$GITHUB_WORKSPACE/app/src/main/assets"
@@ -75,6 +87,7 @@ jobs:
         run: |
           cp app/build/outputs/apk/debug/app-debug.apk nizx-poc.apk
           ls -lh nizx-poc.apk
-          gh release create "poc-${{ github.run_number }}" nizx-poc.apk --prerelease \
+          TAG="poc-${{ github.run_number }}"
+          gh release create "$TAG" nizx-poc.apk --prerelease \
             --title "PoC #${{ github.run_number }}" \
-            --notes "Node: ${{ inputs.nodejs_mobile_tag }} | Baileys: ${{ inputs.baileys_version }}"
+            --notes "Node: ${NODE_TAG:-v18.17.2} | Baileys: ${BAILEYS_VERSION:-6.7}"
