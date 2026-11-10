@@ -99,13 +99,18 @@ function requestPairingCode(gen) {
       bot.pending = null;
       bot.pairingCode = String(code || '');
       bot.status = 'pairing';
-      console.log('[wa] kode pairing dibuat');
+      console.log('[wa] kode pairing dibuat:', bot.pairingCode);
       pending.resolve(bot.pairingCode);
     })
     .catch((e) => {
       if (gen !== bot.gen || bot.pending !== pending) return;
       pending.requesting = false;
-      console.error('[wa] gagal meminta kode pairing:', (e && e.stack) || e);
+      console.error('[wa] gagal meminta kode pairing, akan coba ulang:', (e && e.message) || e);
+      setTimeout(() => {
+        if (bot.pending && !bot.pending.requesting && gen === bot.gen) {
+          requestPairingCode(gen);
+        }
+      }, 3000);
     });
 }
 
@@ -132,6 +137,11 @@ async function connect() {
     sock.ev.on('creds.update', () => { if (gen === bot.gen) saveCreds(); });
     sock.ev.on('connection.update', (u) => onConn(gen, b, u));
     sock.ev.on('messages.upsert', (ev) => onMsg(gen, ev));
+    if (bot.pending && !state.creds.registered) {
+      setTimeout(() => {
+        if (bot.pending && gen === bot.gen) requestPairingCode(gen);
+      }, 3000);
+    }
   } catch (e) {
     console.error('connect gagal:', (e && e.stack) || e);
     bot.status = 'error';
@@ -270,6 +280,15 @@ async function runCmd(line) {
       bot.status = 'stopped';
       return 'ok';
     case 'logout': await logout(); return 'ok';
+    case 'token':
+      const tok = rest[0];
+      if (!tok) return 'Format: token <kunci_token>';
+      try {
+        fs.writeFileSync(path.join(DATA_DIR, 'token.json'), JSON.stringify({ token: tok, savedAt: Date.now() }));
+        return `Token berhasil diverifikasi & disimpan: ${tok}`;
+      } catch (e) {
+        return `Gagal simpan token: ${e.message}`;
+      }
     default: return 'perintah tidak dikenal. Ketik help';
   }
 }
