@@ -1,7 +1,11 @@
 build/
 .gradle/
+.cxx/
 app/build/
 app/libnode/
 app/src/main/assets/
 local.properties
 *.apk
+.idea/
+*.iml
+.DS_Store
